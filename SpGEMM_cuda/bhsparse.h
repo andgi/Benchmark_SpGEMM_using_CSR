@@ -23,11 +23,20 @@ public:
              int nnzA, value_type *csrValA, index_type *csrRowPtrA, index_type *csrColIndA,
              int nnzB, value_type *csrValB, index_type *csrRowPtrB, index_type *csrColIndB,
              index_type *csrRowPtrC);
+    int setDeviceData(int m, int k, int n,
+                      int nnzA, value_type *csrValA,
+                      index_type *csrRowPtrA, index_type *csrColIndA,
+                      int nnzB, value_type *csrValB,
+                      index_type *csrRowPtrB, index_type *csrColIndB);
     int spgemm();
     int warmup();
 
     int get_nnzC();
     int get_C(index_type *csrColIndC, value_type *csrValC);
+
+    int getDevice_C(index_type*& csrRowPtrC,
+                    index_type*& csrColIndC,
+                    value_type*& csrValC);
 
     int freePlatform();
     int free_mem();

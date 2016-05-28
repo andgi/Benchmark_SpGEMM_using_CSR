@@ -23,6 +23,14 @@ public:
              int nnzA, value_type *csrValA, index_type *csrRowPtrA, index_type *csrColIndA,
              int nnzB, value_type *csrValB, index_type *csrRowPtrB, index_type *csrColIndB,
              index_type *csrRowPtrC, index_type *csrRowPtrCt, index_type *queue_one);
+    // NOTE: setCudaData() requires all buffers to be in device memory.
+    int setCudaData(int m, int k, int n,
+                    int nnzA, value_type *csrValA,
+                    index_type *csrRowPtrA, index_type *csrColIndA,
+                    int nnzB, value_type *csrValB,
+                    index_type *csrRowPtrB, index_type *csrColIndB,
+                    index_type *h_csrRowPtrCt,
+                    index_type *h_queue_one);
 
     void setProfiling(bool profiling);
     int kernel_barrier();
@@ -47,6 +55,9 @@ public:
 
     int get_nnzC();
     int get_C(index_type *csrColIndC, value_type *csrValC);
+    int getDevice_C(index_type*& csrRowPtrC,
+                    index_type*& csrColIndC,
+                    value_type*& csrValC);
 
 private:
     bool _profiling;

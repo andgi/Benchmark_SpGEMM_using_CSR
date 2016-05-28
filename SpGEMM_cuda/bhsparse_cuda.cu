@@ -12,6 +12,16 @@
 #include "bhsparse_cuda.h"
 
 bhsparse_cuda::bhsparse_cuda()
+    : _profiling(false),
+      _num_smxs(0), _max_blocks_per_smx(0),
+      _m(0), _k(0), _n(0),
+      _nnzA(0), _d_csrValA(0), _d_csrRowPtrA(0), _d_csrColIndA(0),
+      _nnzB(0), _d_csrValB(0), _d_csrRowPtrB(0), _d_csrColIndB(0),
+      _nnzC(0), _h_csrRowPtrC(0), _d_csrRowPtrC(0), _d_csrColIndC(0),
+      _d_csrValC(0),
+      _nnzCt(0), _d_csrValCt(0), _d_csrColIndCt(0), _d_csrRowPtrCt(0),
+      _h_csrRowPtrCt(0),
+      _h_queue_one(0), _d_queue_one(0)
 {
 }
 
@@ -124,6 +134,67 @@ int bhsparse_cuda::initData(int m, int k, int n,
     return err;
 }
 
+int bhsparse_cuda::setCudaData(int m, int k, int n,
+                               int nnzA, value_type *csrValA,
+                               index_type *csrRowPtrA, index_type *csrColIndA,
+                               int nnzB, value_type *csrValB,
+                               index_type *csrRowPtrB, index_type *csrColIndB,
+                               index_type *h_csrRowPtrCt,
+                               index_type *h_queue_one)
+{
+    int err = 0;
+
+    _m = m;
+    _k = k;
+    _n = n;
+
+    _nnzA = nnzA;
+    _nnzB = nnzB;
+    _nnzC = 0;
+    _nnzCt = 0;
+
+    // Set up the pointers to the supplied device memory blocks.
+
+    // Matrix A
+    _d_csrColIndA = csrColIndA;
+    _d_csrRowPtrA = csrRowPtrA;
+    _d_csrValA    = csrValA;
+
+    // Matrix B
+    _d_csrColIndB = csrColIndB;
+    _d_csrRowPtrB = csrRowPtrB;
+    _d_csrValB    = csrValB;
+
+    // Matrix C
+    checkCudaErrors(cudaMalloc((void **)&_d_csrRowPtrC, (_m+1) * sizeof(index_type)));
+    checkCudaErrors(cudaMemset(_d_csrRowPtrC, 0, (_m+1) * sizeof(index_type)));
+    // FIXME: Is _h_csrRowPtrC required? Yes, to compute the non-zeros.
+    if (_h_csrRowPtrC) {
+        std::free(_h_csrRowPtrC);
+    }
+    _h_csrRowPtrC = (index_type *)malloc((_m+1) * sizeof(index_type));
+
+    // Matrix Ct
+    // FIXME: Is _h_csrRowPtrCt required? No? Yes? Used in bhsparse.
+    _h_csrRowPtrCt = h_csrRowPtrCt;
+    checkCudaErrors(cudaMalloc((void **)&_d_csrRowPtrCt, (_m+1) * sizeof(index_type)));
+    checkCudaErrors(cudaMemset(_d_csrRowPtrCt, 0, (_m+1) * sizeof(index_type)));
+
+    // statistics - queue_one
+    // FIXME: Is _h_queue_one required? Yes, it seems so.
+    _h_queue_one = h_queue_one;
+    if (_d_queue_one) {
+        cudaFree(_d_queue_one);
+    }
+    checkCudaErrors(cudaMalloc((void **)&_d_queue_one,
+                               TUPLE_QUEUE * _m * sizeof(index_type)));
+    checkCudaErrors(cudaMemset(_d_queue_one, 0,
+                               TUPLE_QUEUE * _m * sizeof(index_type)));
+    return err;
+}
+
+
+
 void bhsparse_cuda::setProfiling(bool profiling)
 {
     _profiling = profiling;
@@ -199,7 +270,9 @@ int bhsparse_cuda::compute_nnzCt()
     if (err != cudaSuccess)
     {  cout << "err = " << cudaGetErrorString(err) << endl; return -1; }
 
-    checkCudaErrors(cudaMemcpy(_h_csrRowPtrCt, _d_csrRowPtrCt, (_m + 1) * sizeof(index_type), cudaMemcpyDeviceToHost));
+    if (_h_csrRowPtrCt) {
+        checkCudaErrors(cudaMemcpy(_h_csrRowPtrCt, _d_csrRowPtrCt, (_m + 1) * sizeof(index_type), cudaMemcpyDeviceToHost));
+    }
 
     return BHSPARSE_SUCCESS;
 }
@@ -2801,6 +2874,31 @@ int bhsparse_cuda::get_C(index_type *csrColIndC, value_type *csrValC)
     checkCudaErrors(cudaMemcpy(csrColIndC, _d_csrColIndC, _nnzC * sizeof(index_type),   cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(_h_csrRowPtrC, _d_csrRowPtrC, (_m + 1) * sizeof(index_type),   cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(csrValC, _d_csrValC, _nnzC * sizeof(value_type),   cudaMemcpyDeviceToHost));
+
+    return err;
+}
+
+int bhsparse_cuda::getDevice_C(index_type*& csrRowPtrC,
+                               index_type*& csrColIndC,
+                               value_type*& csrValC)
+{
+    int err = 0;
+    csrRowPtrC = _d_csrRowPtrC;
+    csrColIndC = _d_csrColIndC;
+    csrValC    = _d_csrValC;
+
+    // These buffers now belong to the client.
+    _d_csrRowPtrC = 0;
+    _d_csrColIndC = 0;
+    _d_csrValC    = 0;
+
+    // These are presumed to belong to the client and will not be used further.
+    _d_csrRowPtrA = 0;
+    _d_csrColIndA = 0;
+    _d_csrValA    = 0;
+    _d_csrRowPtrB = 0;
+    _d_csrColIndB = 0;
+    _d_csrValB    = 0;
 
     return err;
 }
