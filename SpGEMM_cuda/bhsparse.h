@@ -23,11 +23,19 @@ public:
              int nnzA, value_type *csrValA, index_type *csrRowPtrA, index_type *csrColIndA,
              int nnzB, value_type *csrValB, index_type *csrRowPtrB, index_type *csrColIndB,
              index_type *csrRowPtrC);
+    int setDeviceData(int m, int k, int n,
+                      int nnzA, value_type *csrValA,
+                      index_type *csrRowPtrA, index_type *csrColIndA,
+                      int nnzB, value_type *csrValB,
+                      index_type *csrRowPtrB, index_type *csrColIndB);
     int spgemm();
     int warmup();
 
     int get_nnzC();
     int get_C(index_type *csrColIndC, value_type *csrValC);
+    int getDevice_C(index_type*& csrRowPtrC,
+                    index_type*& csrColIndC,
+                    value_type*& csrValC);
 
     int freePlatform();
     int free_mem();
@@ -249,6 +257,87 @@ int bhsparse::initData(int m, int k, int n,
                 //                        _nnzA, _h_csrValA, _h_csrRowPtrA, _h_csrColIndA,
                 //                        _nnzB, _h_csrValB, _h_csrRowPtrB, _h_csrColIndB,
                 //                        _h_csrRowPtrC, _h_csrRowPtrCt, _h_queue_one);
+                break;
+            }
+        }
+    }
+
+    return err;
+}
+
+int bhsparse::setDeviceData(int m, int k, int n,
+                            int nnzA, value_type *csrValA,
+                            index_type *csrRowPtrA, index_type *csrColIndA,
+                            int nnzB, value_type *csrValB,
+                            index_type *csrRowPtrB, index_type *csrColIndB)
+{
+    int err = 0;
+
+    _stage1_timer = NULL;
+    _stage2_timer = NULL;
+    _stage3_timer = NULL;
+    _stage4_timer = NULL;
+
+    sdkCreateTimer(&_stage1_timer);
+    sdkCreateTimer(&_stage2_timer);
+    sdkCreateTimer(&_stage3_timer);
+    sdkCreateTimer(&_stage4_timer);
+
+    _m = m;
+    _k = k;
+    _n = n;
+
+    _nnzA = nnzA;
+    _nnzB = nnzB;
+    _nnzC = 0;
+
+    // A
+    _h_csrRowPtrA = 0;
+    _h_csrColIndA = 0;
+    _h_csrValA    = 0;
+
+    // B
+    _h_csrRowPtrB = 0;
+    _h_csrColIndB = 0;
+    _h_csrValB    = 0;
+
+    // C
+    _h_csrRowPtrC = 0;
+
+    // Ct
+    _h_csrRowPtrCt = (index_type *)  malloc((_m+1) * sizeof(index_type));
+    memset(_h_csrRowPtrCt, 0, (_m+1) * sizeof(index_type));
+
+    // statistics
+    _h_counter = (int *)malloc(NUM_SEGMENTS * sizeof(int));
+    memset(_h_counter, 0, NUM_SEGMENTS * sizeof(int));
+
+    _h_counter_one = (int *)malloc((NUM_SEGMENTS + 1) * sizeof(int));
+    memset(_h_counter_one, 0, (NUM_SEGMENTS + 1) * sizeof(int));
+
+    _h_counter_sum = (int *)malloc((NUM_SEGMENTS + 1) * sizeof(int));
+    memset(_h_counter_sum, 0, (NUM_SEGMENTS + 1) * sizeof(int));
+
+    _h_queue_one = (int *)  malloc(TUPLE_QUEUE * _m * sizeof(int));
+    memset(_h_queue_one, 0, TUPLE_QUEUE * _m * sizeof(int));
+
+    for (int i = 0; i < NUM_PLATFORMS; i++)
+    {
+        if (_spgemm_platform[i])
+        {
+            switch (i)
+            {
+            case BHSPARSE_CUDA:
+                err = _bh_sparse_cuda->setCudaData(_m, _k, _n,
+                                                   _nnzA, csrValA,
+                                                   csrRowPtrA, csrColIndA,
+                                                   _nnzB, csrValB,
+                                                   csrRowPtrB, csrColIndB,
+                                                   _h_csrRowPtrCt,
+                                                   _h_queue_one);
+                break;
+            case BHSPARSE_OPENCL:
+                // Not implemented.
                 break;
             }
         }
@@ -659,6 +748,34 @@ int bhsparse::get_C(index_type *csrColIndC, value_type *csrValC)
             {
             case BHSPARSE_CUDA:
                 err = _bh_sparse_cuda->get_C(csrColIndC, csrValC);
+                break;
+            case BHSPARSE_OPENCL:
+                //err = _bh_sparse_opencl->get_C(csrColIndC, csrValC);
+                break;
+            }
+        }
+    }
+    if(err != BHSPARSE_SUCCESS) { cout << "get_C error = " << err << endl; return err; }
+
+    return err;
+}
+
+int bhsparse::getDevice_C(index_type*& csrRowPtrC,
+                          index_type*& csrColIndC,
+                          value_type*& csrValC)
+{
+    int err = 0;
+
+    for (int i = 0; i < NUM_PLATFORMS; i++)
+    {
+        if (_spgemm_platform[i])
+        {
+            switch (i)
+            {
+            case BHSPARSE_CUDA:
+                err = _bh_sparse_cuda->getDevice_C(csrRowPtrC,
+                                                   csrColIndC,
+                                                   csrValC);
                 break;
             case BHSPARSE_OPENCL:
                 //err = _bh_sparse_opencl->get_C(csrColIndC, csrValC);
